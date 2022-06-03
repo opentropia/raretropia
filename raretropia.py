@@ -3,6 +3,8 @@
 import queue
 import time
 from winreg import FlushKey
+from PyQt5 import QtCore
+from PyQt5 import QtGui
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtWidgets import QLabel
 from PyQt5.QtWidgets import QMainWindow
@@ -15,6 +17,8 @@ from PyQt5.QtWidgets import QPushButton
 from PyQt5.QtWidgets import QFormLayout
 from PyQt5.QtWidgets import QLineEdit
 from PyQt5.QtWidgets import QCheckBox
+from PyQt5.QtWidgets import QListWidget
+from PyQt5.QtWidgets import QMessageBox
 from PyQt5.QtCore import QThread
 from PyQt5.QtCore import QTimer
 from appdirs import *
@@ -23,17 +27,37 @@ import os
 import discord
 import asyncio
 from enum import Enum
+import ctypes.wintypes
 
 appauthor  = "opentropia"
 appname = "raretropia"
 
+def get_log_filename(type):
+    CSIDL_PERSONAL = 5       # My Documents
+    SHGFP_TYPE_CURRENT = 0   # Get current, not default value
+    buf = ctypes.create_unicode_buffer(ctypes.wintypes.MAX_PATH)
+    ctypes.windll.shell32.SHGetFolderPathW(
+        None, CSIDL_PERSONAL, None, SHGFP_TYPE_CURRENT, buf)
+
+    return os.path.join(buf.value, "Entropia Universe", type)
+
 default_settings = {
   "Avatar Name": "My Fancy Avatar",
   "Avatar Alias": "Fancy",
+  "Log File": get_log_filename("chat.log"),
   "Token": "dummy",
   "Channel ID": "1234",
   "Foo": True,
 }
+
+default_item_filters = [
+    'Generic Fuse',
+    'Summoning Totem',
+    'Turrelion Essence',
+    'Tail Tip',
+    '.*Adjuster.*',
+    'Tier ([3-9]|10).*'
+]
 
 log_queue = queue.Queue()
 
@@ -53,9 +77,15 @@ def log(message_type, str):
     log_queue.put((message_type, str))
 
 settings_file_path = os.path.join(user_data_dir(appname, appauthor), "settings.json")
+items_file_path = os.path.join(user_data_dir(appname, appauthor), "item-filters.json")
 
 def getData():
     with open(settings_file_path, 'r') as file:
+        data = json.load(file)
+    return data
+
+def getItems():
+    with open(items_file_path, 'r') as file:
         data = json.load(file)
     return data
 
@@ -193,6 +223,11 @@ class Window(QMainWindow):
         avatar_alias.setToolTip("A custom name used in messages, typically your in game short name")
         avatar_alias.editingFinished.connect(lambda: self._datachanged("Avatar Alias", avatar_alias.text()))
         layout.addRow('Avatar Alias', avatar_alias)
+        log_file = QLineEdit()
+        log_file.setText(self._data["Log File"])
+        log_file.setToolTip("Full path to the chat log")
+        log_file.editingFinished.connect(lambda: self._datachanged("Log File", log_file.text()))
+        layout.addRow('Log File', log_file)
         toggle = QCheckBox()
         toggle.setChecked(self._data["Foo"])
         toggle.toggled.connect(lambda: self._datachanged("Foo", toggle.isChecked()))
@@ -201,16 +236,45 @@ class Window(QMainWindow):
 
         return tab
 
+    def _updateListBox(self):
+        items = getItems()
+
+        self._listWidget.clear()
+        for item in items:
+            self._listWidget.addItem(item)
+
+        self._listWidget.addItem("")
+
+        for i in range(self._listWidget.count()):
+            item = self._listWidget.item(i)
+            item.setFlags(item.flags() | QtCore.Qt.ItemIsEditable)
+
+        self._listWidget.itemChanged.connect(lambda: self._updateItemsFromListBox())
+
+    def _updateItemsFromListBox(self):
+        self._listWidget.itemChanged.disconnect()
+
+        new_items = []
+        for i in range(self._listWidget.count()):
+            item = self._listWidget.item(i)
+            if item.text().strip():
+                new_items.append(item.text().strip())
+
+        with open(items_file_path, 'w') as file:
+            file.write(json.dumps(new_items, sort_keys=True, indent=4))
+
+        self._updateListBox()
+
+
     def _createRareListUI(self):
-        tab = QWidget()
+        self._listWidget = QListWidget()
 
-        layout = QVBoxLayout()
-        layout.addWidget(QPushButton('Center'))
-        layout.addWidget(QPushButton('Top'))
-        layout.addWidget(QPushButton('Bottom'))
-        tab.setLayout(layout)
+        self._updateListBox()
 
-        return tab
+        return self._listWidget
+
+    def onClicked(self, item):
+        QMessageBox.information(self, "Info", item.text())
 
     def _createDiscordUI(self):
         tab = QWidget()
@@ -235,9 +299,7 @@ class Window(QMainWindow):
         tab = QWidget()
 
         layout = QVBoxLayout()
-        layout.addWidget(QPushButton('Center'))
-        layout.addWidget(QPushButton('Top'))
-        layout.addWidget(QPushButton('Bottom'))
+        layout.addWidget(QPushButton('TODO'))
         tab.setLayout(layout)
 
         return tab
@@ -257,6 +319,10 @@ def main():
     if not os.path.exists(settings_file_path):
         with open(settings_file_path, 'w') as file:
             file.write(json.dumps(default_settings, sort_keys=True, indent=4))
+
+    if not os.path.exists(items_file_path):
+        with open(items_file_path, 'w') as file:
+            file.write(json.dumps(default_item_filters, sort_keys=True, indent=4))
 
 
     app = QApplication([])
