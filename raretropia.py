@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import queue
+import re
 import time
 from winreg import FlushKey
 from PyQt5 import QtCore
@@ -31,6 +32,11 @@ import ctypes.wintypes
 
 appauthor  = "opentropia"
 appname = "raretropia"
+
+re_log = re.compile(r'(.*?) \[(.*?)\] \[(.*?)\] (.*)')
+re_loot = re.compile(r'You received (.*) x \((\d+)\) Value: (\d+\.\d+) PED')
+re_global_rare = re.compile(r'(.*) has found a rare item \((.*)\) with a value of (\d+) PED.*')
+
 
 def get_log_filename(type):
     CSIDL_PERSONAL = 5       # My Documents
@@ -65,7 +71,7 @@ class MessageType(Enum):
     RARE = 1
     SOOTO = 2
     GLOBAL = 3
-    HOF = 4
+    RARE_HOF = 4
     STOP = 5
     MESSAGE = 6
 
@@ -131,6 +137,16 @@ class DiscordThread(QThread):
                             except Exception as e:
                                 print(e)
 
+                        try:
+                            if message_type == MessageType.RARE:
+                                data = getData()
+                                await self._client.get_channel(getChannelId()).send(f'"{data["Avatar Alias"]}" found something rare {message}')
+                            if message_type == MessageType.RARE_HOF:
+                                data = getData()
+                                await self._client.get_channel(getChannelId()).send(f'{message}')
+                        except Exception as e:
+                            print(e)
+
         @self._client.event
         async def on_ready():
             self.status = "Logged in as {0.user}".format(self._client)
@@ -157,6 +173,64 @@ class DiscordThread(QThread):
         self._should_stop = True
         log(MessageType.STOP, "")
 
+
+class LogFileThread(QThread):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.item_filter = []
+        self.status = ""
+
+    def run(self):
+        while True:
+            log_file = getData()["Log File"]
+            try:
+                logfile = open(os.path.join(log_file), "r", encoding="utf-8")
+                logfile.seek(0, os.SEEK_END)
+                break
+            except Exception as e:
+                self.status = str(e)
+            time.sleep(0.1)
+
+        self.status = "Reading"
+        while True:
+            line = logfile.readline()
+            if not line:
+                time.sleep(0.1)
+                continue
+
+            result = re.match(re_log, line)
+
+            time_stamp = result.group(1)
+            channel = result.group(2)
+            user = result.group(3)
+            message = result.group(4)
+
+            if channel == "System":
+                # Loot
+                result = re.match(re_loot, message)
+                if result:
+                    item = result.group(1)
+                    count = int(result.group(2))
+                    value = float(result.group(3))
+
+                    print(f"item {item}")
+
+                    for item_re in self.item_filter:
+                        print(f"re {item_re}")
+                        if re.match(item_re, item):
+                            log(MessageType.RARE, f"'{item}' x '{count}' value '{value}'")
+            elif channel == "Globals":
+                # Rare HoF
+                result = re.match(re_global_rare, message)
+                if result:
+                    log(MessageType.RARE_HOF, message)
+
+    def setFilter(self, item_filter):
+        self.item_filter = []
+        for item in item_filter:
+            self.item_filter.append(re.compile(item))
+
 class Window(QMainWindow):
     """Main Window."""
     def __init__(self, parent=None):
@@ -168,6 +242,10 @@ class Window(QMainWindow):
 
         self.setWindowTitle(appname)
         self.resize(600, 320)
+
+        # TODO: start/stop and update if path changed
+        self._logfile_thread = LogFileThread()
+        self._logfile_thread.start()
 
         self._createMenu()
         self._createStatusBar()
@@ -190,10 +268,15 @@ class Window(QMainWindow):
             self._discord_thread = None
 
     def timerCallback(self):
+        message = "Discord: "
         if self._discord_thread:
-            self._status.showMessage(self._discord_thread.status)
+            message += self._discord_thread.status
         else:
-            self._status.showMessage("Discord not running, restart the application to load new settings.")
+            message += "Not running, restart the application to load new settings."
+
+        message += " - EU log: " + self._logfile_thread.status
+
+        self._status.showMessage(message)
 
     def _startDiscord(self):
         self._discord_thread = DiscordThread()
@@ -238,6 +321,8 @@ class Window(QMainWindow):
 
     def _updateListBox(self):
         items = getItems()
+
+        self._logfile_thread.setFilter(items)
 
         self._listWidget.clear()
         for item in items:

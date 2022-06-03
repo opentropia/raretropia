@@ -1,6 +1,12 @@
 # raretropia
 
 
+## Build with
+
+python -m pip install -r requirements.txt
+
+pyinstaller raretropia.py  --onefile --windowed
+
 
 ## Discord
 
