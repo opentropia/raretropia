@@ -35,7 +35,7 @@ appname = "raretropia"
 
 re_log = re.compile(r'(.*?) \[(.*?)\] \[(.*?)\] (.*)')
 re_loot = re.compile(r'You received (.*) x \((\d+)\) Value: (\d+\.\d+) PED')
-re_global_rare = re.compile(r'(.*) has found a rare item \((.*)\) with a value of (\d+) PED.*')
+re_global_rare = re.compile(r'(.*) has found a rare item \((.*)\) with a value of (\d+) P.*')
 
 
 def get_log_filename(type):
